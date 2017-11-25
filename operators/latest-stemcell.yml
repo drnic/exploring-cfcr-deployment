@@ -1,0 +1,3 @@
+- type: replace
+  path: /stemcells/os=ubuntu-trusty/version
+  value: latest
