@@ -10,14 +10,14 @@ To maximize the chance that my templates will replace the upstream templates, I'
 
 ```
 export BOSH_DEPLOYMENT=cfcr-kubo
-git clone https://github.com/drnic/drnic-cfcr-kubo-deployment
-bosh deploy drnic-cfcr-kubo-deployment/src/kubo-deployment/manifests/kubo.yml \
-  -o drnic-cfcr-kubo-deployment/operators/final-releases.yml \
-  -o drnic-cfcr-kubo-deployment/operators/latest-stemcell.yml \
-  -o drnic-cfcr-kubo-deployment/operators/no-disk-types.yml \
-  -o drnic-cfcr-kubo-deployment/operators/some-jobs.yml \
-  -o <(drnic-cfcr-kubo-deployment/operators/pick-from-cloud-config.sh drnic-cfcr-kubo-deployment/src/kubo-deployment/manifests/kubo.yml) \
-  -o drnic-cfcr-kubo-deployment/operators/master-ip.yml \
+git clone https://github.com/drnic/cfcr-deployment
+bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
+  -o cfcr-deployment/operators/final-releases.yml \
+  -o cfcr-deployment/operators/latest-stemcell.yml \
+  -o cfcr-deployment/operators/no-disk-types.yml \
+  -o cfcr-deployment/operators/some-jobs.yml \
+  -o <(cfcr-deployment/operators/pick-from-cloud-config.sh cfcr-deployment/src/kubo-deployment/manifests/kubo.yml) \
+  -o cfcr-deployment/operators/master-ip.yml \
   -v deployment_name=$BOSH_DEPLOYMENT \
   -v kubernetes_master_host=10.10.1.241 \
   -n
