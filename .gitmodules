@@ -1,3 +1,6 @@
 [submodule "src/kubo-deployment"]
 	path = src/kubo-deployment
 	url = https://github.com/pivotal-cf-experimental/kubo-deployment
+[submodule "src/kubo-release"]
+	path = src/kubo-release
+	url = https://github.com/cloudfoundry-incubator/kubo-release

@@ -5,8 +5,6 @@
 - type: remove
   path: /instance_groups/name=master/jobs/name=flanneld
 - type: remove
-  path: /instance_groups/name=master/jobs/name=kubernetes-api
-- type: remove
   path: /instance_groups/name=master/jobs/name=kubeconfig
 - type: remove
   path: /instance_groups/name=master/jobs/name=kubernetes-controller-manager
