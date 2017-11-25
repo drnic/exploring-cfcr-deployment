@@ -127,3 +127,22 @@ Error from server (NotFound): the server could not find the requested resource (
 $ kubectl top pod
 Error from server (NotFound): the server could not find the requested resource (get services http:heapster:)
 ```
+
+### Step 3. Enabling DNS.
+
+It looks like `kubo-release` is using [BOSH DNS](https://bosh.io/docs/dns.html) which requires two changes to a BOSH env:
+
+* Update `bosh create-env` with `-o src/bosh-deployment/src/local-dns.yml` operator file
+* Add a runtime config to add `bosh-dns` to all instances:
+
+    ```
+    bosh update-runtime-config src/bosh-deployment/runtime-configs/dns.yml
+    ```
+
+I also added back the `kubo-dns-aliases` job templates to each instance group which sets up the `master.kubo` DNS hostname.
+
+Now when I `bosh ssh master`, the hostname `master.kubo` maps to the master API:
+
+    ```
+    curl -v https://master.kubo:8443 -k
+    ```

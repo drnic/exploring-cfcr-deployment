@@ -1,9 +1,5 @@
 - type: remove
-  path: /instance_groups/name=master/jobs/name=kubo-dns-aliases
-- type: remove
   path: /instance_groups/name=master/jobs/name=cloud-provider
-- type: remove
-  path: /instance_groups/name=master/jobs/name=flanneld
 - type: remove
   path: /instance_groups/name=master/jobs/name=kubeconfig
 - type: remove
@@ -13,8 +9,6 @@
 - type: remove
   path: /instance_groups/name=master/jobs/name=kubernetes-system-specs
 
-- type: remove
-  path: /instance_groups/name=worker/jobs/name=kubo-dns-aliases
 - type: remove
   path: /instance_groups/name=worker/jobs/name=kubeconfig
 - type: remove
