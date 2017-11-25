@@ -143,6 +143,19 @@ I also added back the `kubo-dns-aliases` job templates to each instance group wh
 
 Now when I `bosh ssh master`, the hostname `master.kubo` maps to the master API:
 
-    ```
-    curl -v https://master.kubo:8443 -k
-    ```
+```
+curl -v https://master.kubo:8443 -k
+```
+
+
+### Step 4. Install root CA.
+
+In the `curl` above the `-k` flag is to skip validation of HTTPS certificate. It is much better to validate certificates by providing the root cert with the `curl --cacert` flag.
+
+Similarly, subsystems and clients that interact with `https://master.kubo` will want to validate against the root certificate.
+
+The `kubeconfig` job template creates a shared certificate file `/var/vcap/jobs/kubeconfig/config/ca.perm`. To confirm it works with `curl` (within a `bosh ssh master` or `bosh ssh worker/0` instance):
+
+```
+curl -v https://master.kubo:8443 --cacert /var/vcap/jobs/kubeconfig/config/ca.pem
+```
