@@ -16,4 +16,12 @@
   path: /instance_groups/name=master/jobs/name=kubernetes-system-specs
 
 - type: remove
-  path: /instance_groups/name=worker
+  path: /instance_groups/name=worker/jobs/name=kubo-dns-aliases
+- type: remove
+  path: /instance_groups/name=worker/jobs/name=kubeconfig
+- type: remove
+  path: /instance_groups/name=worker/jobs/name=cloud-provider
+- type: remove
+  path: /instance_groups/name=worker/jobs/name=kubelet
+- type: remove
+  path: /instance_groups/name=worker/jobs/name=kubernetes-proxy

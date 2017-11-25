@@ -15,7 +15,10 @@ bosh deploy drnic-cfcr-kubo-deployment/src/kubo-deployment/manifests/kubo.yml \
   -o drnic-cfcr-kubo-deployment/operators/final-releases.yml \
   -o drnic-cfcr-kubo-deployment/operators/latest-stemcell.yml \
   -o drnic-cfcr-kubo-deployment/operators/no-disk-types.yml \
-  -o drnic-cfcr-kubo-deployment/operators/just-etcd.yml \
-  -o <(drnic-cfcr-kubo-deployment/operators/pick-from-cloud-config.sh drnic-cfcr-kubo-deployment/src/kubo-deployment/manifests/kubo.yml -o drnic-cfcr-kubo-deployment/operators/just-etcd.yml) \
-  -v deployment_name=$BOSH_DEPLOYMENT -n
+  -o drnic-cfcr-kubo-deployment/operators/some-jobs.yml \
+  -o <(drnic-cfcr-kubo-deployment/operators/pick-from-cloud-config.sh drnic-cfcr-kubo-deployment/src/kubo-deployment/manifests/kubo.yml) \
+  -o drnic-cfcr-kubo-deployment/operators/master-ip.yml \
+  -v deployment_name=$BOSH_DEPLOYMENT \
+  -v kubernetes_master_host=10.10.1.241 \
+  -n
 ```

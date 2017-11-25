@@ -1,0 +1,137 @@
+azs:
+- cloud_properties:
+    availability_zone: us-east-2b
+  name: z1
+- cloud_properties:
+    availability_zone: us-east-2b
+  name: z2
+- cloud_properties:
+    availability_zone: us-east-2b
+  name: z3
+compilation:
+  az: z1
+  network: default
+  reuse_compilation_vms: true
+  vm_type: default
+  workers: 5
+disk_types:
+- disk_size: 3000
+  name: default
+- disk_size: 50000
+  name: large
+- disk_size: 5120
+  name: 5GB
+- disk_size: 10240
+  name: 10GB
+- disk_size: 102400
+  name: 100GB
+networks:
+- name: default
+  subnets:
+  - azs:
+    - z1
+    - z2
+    - z3
+    cloud_properties:
+      subnet: subnet-d7aef4ac
+    dns:
+    - 8.8.8.8
+    gateway: 10.10.1.1
+    range: 10.10.1.0/24
+    reserved:
+    - 10.10.1.1/30
+    static:
+    - 10.10.1.240-10.10.1.254
+  type: manual
+- name: vip
+  type: vip
+- name: dmz
+  subnets:
+  - azs:
+    - z1
+    - z2
+    - z3
+    cloud_properties:
+      subnet: subnet-f73a608c
+    dns:
+    - 8.8.8.8
+    gateway: 10.10.0.1
+    range: 10.10.0.0/24
+    reserved:
+    - 10.10.0.1/30
+    - 10.10.0.4
+    - 10.10.0.64
+    static:
+    - 10.10.0.240-10.10.0.254
+  type: manual
+- name: cf-services
+  subnets:
+  - azs:
+    - z1
+    - z2
+    - z3
+    cloud_properties:
+      subnet: subnet-a91d39d2
+    dns:
+    - 8.8.8.8
+    gateway: 10.10.2.1
+    range: 10.10.2.0/24
+    reserved:
+    - 10.10.2.1/30
+    static:
+    - 10.10.2.240-10.10.2.254
+  type: manual
+vm_extensions:
+- cloud_properties:
+    disk: 51200
+  name: 50GB_ephemeral_disk
+- cloud_properties:
+    disk: 102400
+  name: 100GB_ephemeral_disk
+- cloud_properties:
+    ports:
+    - host: 80
+    - host: 443
+    - host: 2222
+  name: ssh-proxy-and-router-lb
+- cloud_properties:
+    ports:
+    - host: 1024-1123
+  name: cf-tcp-router-network-properties
+- cloud_properties:
+    ports:
+    - host: 8845
+  name: credhub-lb
+vm_types:
+- cloud_properties:
+    ephemeral_disk:
+      size: 25000
+    instance_type: m4.large
+    spot_bid_price: 0.05
+  name: default
+- cloud_properties:
+    ephemeral_disk:
+      size: 50000
+    instance_type: m4.xlarge
+    spot_bid_price: 0.05
+  name: large
+- cloud_properties:
+    ephemeral_disk:
+      size: 10240
+    instance_type: m4.large
+  name: minimal
+- cloud_properties:
+    ephemeral_disk:
+      size: 10240
+    instance_type: t2.small
+  name: sharedcpu
+- cloud_properties:
+    ephemeral_disk:
+      size: 10240
+    instance_type: t2.small
+  name: small
+- cloud_properties:
+    ephemeral_disk:
+      size: 10240
+    instance_type: m4.xlarge
+  name: small-highmem
