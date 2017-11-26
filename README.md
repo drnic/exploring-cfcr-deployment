@@ -159,3 +159,37 @@ The `kubeconfig` job template creates a shared certificate file `/var/vcap/jobs/
 ```
 curl -v https://master.kubo:8443 --cacert /var/vcap/jobs/kubeconfig/config/ca.pem
 ```
+
+### Step 5. Running Kubelets
+
+After adding `kubelet` job template back to the `worker` instance group, it initially fails with a variety of errors similar to:
+
+```
+==> /var/vcap/sys/log/kubelet/kubelet.stderr.log <==
+Unable to register node "10.10.1.20" with API server: nodes is forbidden: User "kubelet" cannot create nodes at the cluster scope
+```
+
+There is a `kubo-release` job template `apply-specs` that looks to be an errand; but its not mentioned in `kubo.yml`; rather its in an operator file `kubo-deployments/manifests/ops-files/addons-spec.yml` as a collocated errand (the job template is definitely an errand as it contains `bin/run` and an empty `monit` file). This means that `bosh run-errand apply-specs` will run on all `master` instances. I'm not sure if that's intentional or accidental. Perhaps this could be changed to a [post-start](https://bosh.io/docs/post-start.html) script (rather than an errand). Additional, perhaps place an `<% if spec.bootstrap %>` around it so the commands are only run once per deploy (on `master/0` unnecessarily by all `master` instances). Issue raised https://github.com/cloudfoundry-incubator/kubo-release/issues/133.
+
+So I added back all the job templates, except `cloud-provider`, and redeployed. The cluster seemed to work.
+
+I successfully deployed this example https://github.com/kubernetes/examples/tree/master/staging/elasticsearch
+
+But I do not have an external IP for exposing services:
+
+```
+$ kubectl get service elasticsearch
+NAME            TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                         AGE
+elasticsearch   LoadBalancer   10.100.200.99   <pending>     9200:31597/TCP,9300:31686/TCP   2m
+```
+
+The two `top` commands look like:
+
+```
+$ kubectl top pods
+W1126 03:57:20.704690   19017 top_pod.go:192] Metrics not available for pod default/es-stcnz, age: 3m13.704684047s
+error: Metrics not available for pod default/es-stcnz, age: 3m13.704684047s
+
+$ kubectl top nodes
+error: failed to unmarshall heapster response: json: cannot unmarshal array into Go value of type v1alpha1.NodeMetricsList
+```

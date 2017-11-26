@@ -1,15 +1,13 @@
 - type: remove
   path: /instance_groups/name=master/jobs/name=cloud-provider
-- type: remove
-  path: /instance_groups/name=master/jobs/name=kubernetes-controller-manager
-- type: remove
-  path: /instance_groups/name=master/jobs/name=kubernetes-scheduler
-- type: remove
-  path: /instance_groups/name=master/jobs/name=kubernetes-system-specs
+# - type: remove
+#   path: /instance_groups/name=master/jobs/name=kubernetes-controller-manager
+# - type: remove
+#   path: /instance_groups/name=master/jobs/name=kubernetes-scheduler
+# - type: remove
+#   path: /instance_groups/name=master/jobs/name=kubernetes-system-specs
 
 - type: remove
   path: /instance_groups/name=worker/jobs/name=cloud-provider
-- type: remove
-  path: /instance_groups/name=worker/jobs/name=kubelet
-- type: remove
-  path: /instance_groups/name=worker/jobs/name=kubernetes-proxy
+# - type: remove
+#   path: /instance_groups/name=worker/jobs/name=kubernetes-proxy
