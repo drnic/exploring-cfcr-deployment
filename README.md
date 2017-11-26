@@ -11,17 +11,28 @@ To maximize the chance that my templates will replace the upstream templates, I'
 ```
 export BOSH_DEPLOYMENT=cfcr-kubo
 export master_host=10.10.1.241
+export routing_host=10.10.1.242
 
 git clone https://github.com/drnic/cfcr-deployment
 bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
+  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy.yml \
+  -o <(cfcr-deployment/operators/pick-from-cloud-config.sh \
+      cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
+    -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy.yml) \
+  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy-vsphere.yml \
+  -v worker_haproxy_ip_addresses=$routing_host \
+  -v worker_haproxy_tcp_backend_port=32326 \
+  -v worker_haproxy_tcp_frontend_port=9200 \
   -o cfcr-deployment/operators/final-releases.yml \
   -o cfcr-deployment/operators/latest-stemcell.yml \
   -o cfcr-deployment/operators/no-disk-types.yml \
   -o cfcr-deployment/operators/some-jobs.yml \
-  -o <(cfcr-deployment/operators/pick-from-cloud-config.sh cfcr-deployment/src/kubo-deployment/manifests/kubo.yml) \
   -o cfcr-deployment/operators/master-ip.yml \
   -v deployment_name=$BOSH_DEPLOYMENT \
+  -v deployments_network=default \
   -v kubernetes_master_host=$master_host \
+  -v kubernetes_master_port=8443 \
+  -v authorization_mode=abac \
   -n
 ```
 
@@ -119,15 +130,6 @@ I've started reading the `kubo-release` job template scripts and see references 
 Task 778 | 06:25:54 | Warning: DNS address not available for the link provider instance: master/4616497e-a195-41fe-b4d2-b347969c4b04
 ```
 
-Whilst `kubectl get pod` doesn't fail, we haven't wired up the workers to the API, so other commands fail:
-
-```
-$ kubectl top node
-Error from server (NotFound): the server could not find the requested resource (get services http:heapster:)
-$ kubectl top pod
-Error from server (NotFound): the server could not find the requested resource (get services http:heapster:)
-```
-
 ### Step 3. Enabling DNS.
 
 It looks like `kubo-release` is using [BOSH DNS](https://bosh.io/docs/dns.html) which requires two changes to a BOSH env:
@@ -183,13 +185,69 @@ NAME            TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)            
 elasticsearch   LoadBalancer   10.100.200.99   <pending>     9200:31597/TCP,9300:31686/TCP   2m
 ```
 
-The two `top` commands look like:
+### Step 6. Ingress to Elastic Search
+
+So the default `kubo.yml` manifest doesn't appear to have a default option for an external IP to route traffic. I think it should. Then, if a deployer wants to use `cf` or `iaas` or another routing method they can use an operator file that changes the base manifest.
+
+But again, I don't know kubernetes well.
+
+"The current implementation of HAProxy routing is a single-port TCP pass-through. In order to route traffic to multiple Kubernetes services, use an Ingress controller" (from [kubo docs](https://docs-cfcr.cfapps.io/installing/haproxy/)) - so the `worker-haproxy` only proxies a single TPC port to a single backend port (on all `worker` instances). So its only useful for a single Kubernetes deployment?
+
+Nonetheless, perhaps the default `kubo.yml` should expose one port binding for an initial demo.
+
+Another idea, would be to provide an operator file to run the Cloud Foundry routing within the `kubo.yml` deployment; rather than only via a full CF deployment.
+
+I looked at the assigned port for my elasticsearch cluster and see that port `32326` maps to the elasticsearch http api (port 9200).
 
 ```
-$ kubectl top pods
-W1126 03:57:20.704690   19017 top_pod.go:192] Metrics not available for pod default/es-stcnz, age: 3m13.704684047s
-error: Metrics not available for pod default/es-stcnz, age: 3m13.704684047s
-
-$ kubectl top nodes
-error: failed to unmarshall heapster response: json: cannot unmarshal array into Go value of type v1alpha1.NodeMetricsList
+$ kubectl get service elasticsearch
+NAME            TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                         AGE
+elasticsearch   LoadBalancer   10.100.200.168   <pending>     9200:32326/TCP,9300:30847/TCP   55s
 ```
+
+I configured the backend port to `32326` and used the expected `9200` as my frontend port:
+
+```
+  -v worker_haproxy_tcp_backend_port=32326 \
+  -v worker_haproxy_tcp_frontend_port=9200 \
+```
+
+Now I can access my Elastic Search cluster from the new `worker-haproxy` static IP:
+
+```
+$ curl http://10.10.1.242:9200/_cluster/health?pretty
+{
+  "cluster_name" : "myesdb",
+  "status" : "green",
+  ...
+```
+
+But `EXTERNAL-IP` is still not configured. Not sure yet if this is good or bad. I mean, the haproxy works - but its only routing a single ingress route to a single backend port. So, "works" is probably worth "double "double" quotes".
+
+The snippet of `bosh deploy` that uses haproxy is:
+
+```
+bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
+  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy.yml \
+  -o <(cfcr-deployment/operators/pick-from-cloud-config.sh \
+      cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
+    -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy.yml) \
+  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy-vsphere.yml \
+  -v worker_haproxy_ip_addresses=$routing_host \
+  -v worker_haproxy_tcp_backend_port=32326 \
+  -v worker_haproxy_tcp_frontend_port=9200 \
+  ...
+```
+
+## Questions about variables
+
+Why are these variables rather than just using job spec defaults?
+
+* `kubernetes_master_port` - default is `8443`
+* `kubernetes_master_port` - why is it a variable rather than a default?
+* `authorization_mode` - default is `rbac`; but `project-config.yml` suggests `abac` ("Note: RBAC is not stable as of 0.8.x.")
+
+Why these variables rather than sane defaults?
+
+* `deployment_name` - suggested change to `cfcr`
+* `deployments_network` - suggested change to `default`
