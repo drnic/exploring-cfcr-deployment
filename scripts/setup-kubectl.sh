@@ -2,7 +2,8 @@
 
 director_name=${BOSH_ENVIRONMENT:?required} # probably
 deployment_name=${BOSH_DEPLOYMENT:?required}
-address="https://${master_host:?required}:8443"
+address="https://${TCP_ROUTING_HOSTNAME:?required}:8443"
+
 admin_password=$(bosh int <(credhub get -n "${director_name}/${deployment_name}/kubo-admin-password" --output-json) --path=/value)
 context_name="kubo-${deployment_name}"
 

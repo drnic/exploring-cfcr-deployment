@@ -9,11 +9,23 @@ At the time of starting this project I do not know Kubernetes and have not attem
 To maximize the chance that my templates will replace the upstream templates, I'll will always start with the same `manifests/kubo.yml` file. So, I've got the upstream `kubo-deployment` as a submodule.
 
 ```
-export BOSH_DEPLOYMENT=cfcr
-export master_host=10.10.1.241
-export routing_host=10.10.1.242
-
 git clone https://github.com/drnic/cfcr-deployment
+
+export BOSH_DEPLOYMENT=cfcr
+export TCP_ROUTING_HOSTNAME=18-216-223-192.sslip.io
+
+cat > cf-vars.yml <<YAML
+routing-cf-api-url: https://api.18-220-96-60.sslip.io
+routing-cf-uaa-url: https://uaa.18-220-96-60.sslip.io
+routing-cf-client-id: routing_api_client
+routing-cf-client-secret: <<credhub get -n my-bosh/cf/uaa_clients_routing_api_client_secret>>
+routing-cf-app-domain-name: 18-220-96-60.sslip.io
+routing-cf-nats-internal-ips: [10.10.1.6]
+routing-cf-nats-port: 4222
+routing-cf-nats-username: nats
+routing-cf-nats-password: <<credhub get -n my-bosh/cf/nats_password>>
+YAML
+
 bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
   \
   -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/cf-routing.yml \
@@ -27,21 +39,22 @@ bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
   -o cfcr-deployment/operators/latest-stemcell.yml \
   -o cfcr-deployment/operators/no-disk-types.yml \
   -o cfcr-deployment/operators/some-jobs.yml \
-  -o cfcr-deployment/operators/master-ip.yml \
   -v deployment_name=$BOSH_DEPLOYMENT \
-  -v kubernetes_master_ip=$master_host \
-  -v kubernetes_master_host=$master_host \
+  -v kubernetes_master_host=$TCP_ROUTING_HOSTNAME \
   -v kubernetes_master_port=8443 \
-  -v authorization_mode=abac \
+  -v authorization_mode=rbac \
   -n
 ```
 
 Instructions for setting up `kubctl config`, to create local configuration file `~/.kube/config`.
 
 ```
-director_name=$BOSH_ENVIRONMENT # probably
+export BOSH_DEPLOYMENT=cfcr
+export TCP_ROUTING_HOSTNAME=18-216-223-192.sslip.io
+
+director_name=${BOSH_ENVIRONMENT:?required} # probably
 deployment_name=$BOSH_DEPLOYMENT
-address="https://${master_host}:8443"
+address="https://${TCP_ROUTING_HOSTNAME}:8443"
 admin_password=$(bosh int <(credhub get -n "${director_name}/${deployment_name}/kubo-admin-password" --output-json) --path=/value)
 context_name="kubo-${deployment_name}"
 
@@ -72,7 +85,10 @@ $ kubectl get pods
 No resources found.
 
 $ kubectl cluster-info
-Kubernetes master is running at https://10.10.1.241:8443
+Kubernetes master is running at https://18-216-223-192.sslip.io:8443
+Heapster is running at https://18-216-223-192.sslip.io:8443/api/v1/namespaces/kube-system/services/heapster/proxy
+KubeDNS is running at https://18-216-223-192.sslip.io:8443/api/v1/namespaces/kube-system/services/kube-dns/proxy
+monitoring-influxdb is running at https://18-216-223-192.sslip.io:8443/api/v1/namespaces/kube-system/services/monitoring-influxdb/proxy
 ```
 
 ## In progress thoughts
@@ -227,6 +243,8 @@ But `EXTERNAL-IP` is still not configured. Not sure yet if this is good or bad. 
 The snippet of `bosh deploy` that uses haproxy is:
 
 ```
+export routing_host=10.10.1.242
+
 bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
   -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy.yml \
   -o <(cfcr-deployment/operators/pick-from-cloud-config.sh \
@@ -342,22 +360,88 @@ We can see that in the logs that the `route.TCP` registers public port `9300` wh
 ```
 $ kubectl get svc
 NAME            TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                         AGE
-elasticsearch   LoadBalancer   10.100.200.239   <pending>     9200:32419/TCP,9300:30943/TCP   57m
+elasticsearch   LoadBalancer   10.100.200.213   <pending>     9200:32100/TCP,9300:32005/TCP   2m
+kubernetes      ClusterIP      10.100.200.1     <none>        443/TCP                         24m
 ```
 
 The `30943` port happens to be the `:9300` port inside the service; and `32419` happens to be HTTP `:9200`. But I don't know why/how `route-sync` figured out which port to map to what ES port.
 
-**Unknown:** In https://docs-cfcr.cfapps.io/installing/cf-routing/#step-3-configure-cfcr-for-cloud-foundry-routing it says "Set the `kubernetes_master_host` to the TCP router hostname or IP address for Cloud Foundry. This is typically tcp.YOUR-APPS-DOMAIN, such as tcp.apps.cf-example.com." I'm not sure why `tcp.mydomain.com` would be a good hostname for the Kubernetes cluster. The `kubo-ci` integration tests also make this assuption. Bit confused about this.
+
+### Step 8. Access Kube API thru CF routing
+
+In https://docs-cfcr.cfapps.io/installing/cf-routing/#step-3-configure-cfcr-for-cloud-foundry-routing it says "Set the `kubernetes_master_host` to the TCP router hostname or IP address for Cloud Foundry. This is typically tcp.YOUR-APPS-DOMAIN, such as tcp.apps.cf-example.com."
+
+This documentation seems to conflict with the usage of `((kubernetes_master_host))` variable in the kubo-deployment operator files:
+
+* `master-static-ip-openstack.yml` and `master-static-ip-vsphere.yml` - it must be an IP address; and there can only be 1 `master` node
+* `kubo.yml` - it could be either an IP or a hostname; the value is used in `tls-kubernetes` certificate
+* `cf-routing.yml` - it adds the IP/hostname to `tls-kubelet` certificate; why not do this in kubo.yml initially?
+
+There is also a dual usage of `((kubernetes_master_port))`:
+
+* `kubo.yml` uses it as the binding port on `master` instances for the Kube API. As discussed [Questions about variables](#questions-about-variables) below, I don't see a need for this to be a variable. Why would an operator care what its value is? Just assume it is `:8443`.
+* `cf-routing.yml` re-uses the variable as the TCP routing port. Perhaps it is variable here; but again the operator can always write a small operator file if they have already assigned `:8443` to another Cloud Foundry application route.
+
+Anyway, back to `((kubernetes_master_host))`.
+
+Let's untangle this duplicate usage of the single variable `kubernetes_master_host`.
+
+First things first, the `cf-routing.yml` operator file adds `kubernetes-api-route-registrar` to `master` instance group. That means, that the CF TCP router is routing any traffic on its `:8443` to one of the `master` instances on port `8443`.
+
+Testing this (my CF router is at `18-216-223-192.sslip.io`) confirms it:
+
+```
+$ curl -k https://18-216-223-192.sslip.io:8443
+{
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/\": No policy matched.",
+  "reason": "Forbidden",
+  ...
+}
+```
+
+With this new path, I can stop giving `master/0` a static IP and can update the `kubectl config` instructions to use the `https://18-216-223-192.sslip.io:8443` hostname. I can stop using this repo's `operators/master-ip.yml` operator.
+
+I'll add `$TCP_ROUTING_HOSTNAME` to document that an operator needs to know this in advance; and pass this as the value of `kubernetes_master_host`:
+
+```
+bosh deploy ...
+  -v kubernetes_master_host=$TCP_ROUTING_HOSTNAME \
+```
+
+Both `tls-kubernetes` and `tls-kubelet` certificate need to be re-generated and deployed.
+
+```
+credhub delete -n /my-bosh/cfcr/tls-kubernetes
+credhub delete -n /my-bosh/cfcr/tls-kubelet
+```
+
+When I run `bosh deploy` it will regenerate the `kubernetes` and `tls-kubelet` certificates; and it will recreate the `master/0` vm as it will change from an assigned static IP to a dynamic IP.
+
+So the dual use of `((kubernetes_master_host))` in the manifests are mutually exclusive:
+* either as an IP (for static IPs but no CF routing);
+* or a hostname (for routing but without static IPs)
 
 ## Questions about variables
 
 Why are these variables rather than just using job spec defaults?
 
-* `kubernetes_master_port` - default is `8443`; so can remove as a variable
-* `authorization_mode` - default is `rbac`; but `project-config.yml` suggests `abac` ("Note: RBAC is not stable as of 0.8.x.")
+* `kubernetes_master_port` - default is `8443`; so can remove as a variable in `kubo.yml` and `cf-routing.yml`
+* `authorization_mode` - default is `rbac`; but `project-config.yml` suggests `abac` ("Note: RBAC is not stable as of 0.8.x.") But https://github.com/cloudfoundry-incubator/kubo-release/issues/104 suggests using `rbac`.
 
 Why these variables rather than sane defaults?
 
 * `deployment_name` - suggested change to `cfcr`
 * `deployments_network` - suggested change to `default`
-* `authorization_mode` - suggested change to `abac` (if `rbac` is not stable/working)
+* `authorization_mode` - suggested change to `rbac` https://github.com/cloudfoundry-incubator/kubo-release/issues/104
+
+## General questions and ideas
+
+### Use manifest addons
+
+Nearly all instance groups have some common jobs:
+
+* `kubo-dns-aliases`
+* `kubeconfig`
+* `cloud-provider`
+
+Perhaps these could be installed via `/addons` section rather than explicitly listed in each instance group.
