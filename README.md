@@ -9,27 +9,27 @@ At the time of starting this project I do not know Kubernetes and have not attem
 To maximize the chance that my templates will replace the upstream templates, I'll will always start with the same `manifests/kubo.yml` file. So, I've got the upstream `kubo-deployment` as a submodule.
 
 ```
-export BOSH_DEPLOYMENT=cfcr-kubo
+export BOSH_DEPLOYMENT=cfcr
 export master_host=10.10.1.241
 export routing_host=10.10.1.242
 
 git clone https://github.com/drnic/cfcr-deployment
 bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
-  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy.yml \
+  \
+  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/cf-routing.yml \
+  -l cf-vars.yml \
+  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/remove-haproxy.yml \
   -o <(cfcr-deployment/operators/pick-from-cloud-config.sh \
       cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
-    -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy.yml) \
-  -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/worker-haproxy-vsphere.yml \
-  -v worker_haproxy_ip_addresses=$routing_host \
-  -v worker_haproxy_tcp_backend_port=32326 \
-  -v worker_haproxy_tcp_frontend_port=9200 \
+      -o cfcr-deployment/src/kubo-deployment/manifests/ops-files/cf-routing.yml) \
+  \
   -o cfcr-deployment/operators/final-releases.yml \
   -o cfcr-deployment/operators/latest-stemcell.yml \
   -o cfcr-deployment/operators/no-disk-types.yml \
   -o cfcr-deployment/operators/some-jobs.yml \
   -o cfcr-deployment/operators/master-ip.yml \
   -v deployment_name=$BOSH_DEPLOYMENT \
-  -v deployments_network=default \
+  -v kubernetes_master_ip=$master_host \
   -v kubernetes_master_host=$master_host \
   -v kubernetes_master_port=8443 \
   -v authorization_mode=abac \
@@ -66,7 +66,7 @@ A quick sanity test of our local configuration:
 ```
 $ kubectl config get-clusters
 NAME
-cfcr-kubo
+cfcr
 
 $ kubectl get pods
 No resources found.
@@ -239,15 +239,125 @@ bosh deploy cfcr-deployment/src/kubo-deployment/manifests/kubo.yml \
   ...
 ```
 
+### Step 7. Cloud Foundry Routing.
+
+Since I happen to have CF deployment laying about, I'll try out the integration. Although, I'd really prefer that `kubo-deployment` contained an option to spin up its own routing tier and not rely upon CF. But again I might be missing something.
+
+The `kubo-deployment/manifests/ops-files/cf-routing.yml` requires a lot of manually provided variables.
+
+One easy win for next kubo-release will be https://github.com/cloudfoundry-incubator/kubo-release/pull/134 which makes use of `cf` deployment's `nats` link.
+
+Sadly, `cf` doesn't provide a BOSH link for its API/UAA. In late 2017. I've started a PR at https://github.com/cloudfoundry/capi-release/pull/65 but its not getting anywhere yet. So the following variables from `cf-routing.yml` must all be manually provided. BLAH.
+
+```
+uaa_url: ((routing-cf-uaa-url))
+routing_api_url: ((routing-cf-api-url))
+routing_api_client_id: ((routing-cf-client-id))
+routing_api_client_secret: ((routing-cf-client-secret))
+skip_tls_verification: true
+app_domain: ((routing-cf-app-domain-name))
+```
+
+So in the parent directory I now have a `cf-vars.yml`:
+
+```yaml
+routing-cf-api-url: https://api.18-220-96-60.sslip.io
+routing-cf-uaa-url: https://uaa.18-220-96-60.sslip.io
+routing-cf-client-id: routing_api_client
+routing-cf-client-secret: <<credhub uaa_clients_routing_api_client_secret>>
+routing-cf-app-domain-name: 18-220-96-60.sslip.io
+routing-cf-nats-internal-ips: [10.10.1.6]
+routing-cf-nats-port: 4222
+routing-cf-nats-username: nats
+routing-cf-nats-password: 130zCYIC4KUo4rXb0BNEXMHJG0q9gp
+```
+
+For the `routing-cf-client-secret` value, get the `/my-bosh/cf/uaa_clients_routing_api_client_secret` variable. E.g. from credhub:
+
+```
+credhub get -n /aws-community-ohio/cf/uaa_clients_routing_api_client_secret --output-json | jq -r .value
+```
+
+For the `routing-cf-nats-password` value:
+
+```
+credhub get -n /aws-community-ohio/cf/nats_password --output-json | jq -r .value
+```
+
+Routing for CFCR is TCP orientated, so I had to re-enable the `tcp-router` instance group in my `cf` deployment.
+
+At this point, my `cf` deployment now tried to enable BOSH DNS. And that broke my Cloud Foundry initially.
+
+I had to make a couple of PRs to CF/BOSH projects so that I can add CF-related DNS aliases whilst my BOSH already having a global `bosh-dns` addons:
+
+* https://github.com/cloudfoundry/bosh-dns-aliases-release/pull/3
+* https://github.com/cloudfoundry/cf-deployment/pull/341
+
+Now, I can try exposing routes.
+
+I found the instructions in the integration tests https://github.com/pivotal-cf-experimental/kubo-ci/blob/master/src/tests/integration-tests/cloudfoundry/deploy_workload_test.go#L58-L59
+
+```
+kubectl label service elasticsearch http-route-sync=elasticsearch
+```
+
+Now, in the `route-sync` job logs I can see routes being registered:
+
+```
+$ tail -f /var/vcap/sys/log/route-sync/route-sync.stdout.log
+...
+{"timestamp":"1511741377.875425577","source":"route-sync","message":"route-sync.creating-message","log_level":0,"data":{"host":"10.10.1.22","privateInstanceId":"kubo-route-sync","route":{"Name":"","Port":30943,"Tags":null,"URIs":["elasticsearch.18-220-96-60.sslip.io"],"RouteServiceUrl":"","RegistrationInterval":0,"HealthCheck":null},"subject":"router.register"}}
+{"timestamp":"1511741377.875457525","source":"route-sync","message":"route-sync.publishing-message","log_level":0,"data":{"msg":"{\"uris\":[\"elasticsearch.18-220-96-60.sslip.io\"],\"host\":\"10.10.1.22\",\"port\":30943,\"tags\":null,\"private_instance_id\":\"kubo-route-sync\"}"}}
+{"timestamp":"1511741377.875497103","source":"route-sync","message":"route-sync.registered routes","log_level":1,"data":{"HTTP":"[%!q(*route.HTTP=\u0026{elasticsearch.18-220-96-60.sslip.io [{10.10.1.20 32419} {10.10.1.21 32419} {10.10.1.22 32419}]}) %!q(*route.HTTP=\u0026{elasticsearch.18-220-96-60.sslip.io [{10.10.1.20 30943} {10.10.1.21 30943} {10.10.1.22 30943}]})]","TCP":"[]"}}
+```
+
+Trying it out:
+
+```
+curl elasticsearch.18-220-96-60.sslip.io
+{
+  "name" : "6e60be62-8270-451f-b6b1-ea482bec9082",
+  "cluster_name" : "myesdb",
+  ...
+```
+
+BOOM!
+
+I have no idea how this `http-route-sync` knows to route to port `9200` in the master pod (`:9200` is the HTTP API for Elastic Search, `:9300` is for the native Elasticsearch transport protocol)
+
+Okay. Okay. Now for a TCP route:
+
+```
+kubectl label service elasticsearch tcp-route-sync=9300
+```
+
+The `route-sync` logs now show some mention of TCP in them:
+
+```
+{"timestamp":"1511741888.743502617","source":"route-sync","message":"route-sync.registered routes","log_level":1,"data":{"HTTP":"[%!q(*route.HTTP=\u0026{elasticsearch.18-220-96-60.sslip.io [{10.10.1.20 32419} {10.10.1.21 32419} {10.10.1.22 32419}]}) %!q(*route.HTTP=\u0026{elasticsearch.18-220-96-60.sslip.io [{10.10.1.20 30943} {10.10.1.21 30943} {10.10.1.22 30943}]})]","TCP":"[%!q(*route.TCP=\u0026{9300 [{10.10.1.20 32419} {10.10.1.21 32419} {10.10.1.22 32419}]}) %!q(*route.TCP=\u0026{9300 [{10.10.1.20 30943} {10.10.1.21 30943} {10.10.1.22 30943}]})]"}}
+```
+
+We can see that in the logs that the `route.TCP` registers public port `9300` which maps to backend port `30943` on each of the containers. We can also see that `route.HTTP` registers `elasticsearch.18-220-96-60.sslip.io` to backend port `32419`.
+
+```
+$ kubectl get svc
+NAME            TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                         AGE
+elasticsearch   LoadBalancer   10.100.200.239   <pending>     9200:32419/TCP,9300:30943/TCP   57m
+```
+
+The `30943` port happens to be the `:9300` port inside the service; and `32419` happens to be HTTP `:9200`. But I don't know why/how `route-sync` figured out which port to map to what ES port.
+
+**Unknown:** In https://docs-cfcr.cfapps.io/installing/cf-routing/#step-3-configure-cfcr-for-cloud-foundry-routing it says "Set the `kubernetes_master_host` to the TCP router hostname or IP address for Cloud Foundry. This is typically tcp.YOUR-APPS-DOMAIN, such as tcp.apps.cf-example.com." I'm not sure why `tcp.mydomain.com` would be a good hostname for the Kubernetes cluster. The `kubo-ci` integration tests also make this assuption. Bit confused about this.
+
 ## Questions about variables
 
 Why are these variables rather than just using job spec defaults?
 
-* `kubernetes_master_port` - default is `8443`
-* `kubernetes_master_port` - why is it a variable rather than a default?
+* `kubernetes_master_port` - default is `8443`; so can remove as a variable
 * `authorization_mode` - default is `rbac`; but `project-config.yml` suggests `abac` ("Note: RBAC is not stable as of 0.8.x.")
 
 Why these variables rather than sane defaults?
 
 * `deployment_name` - suggested change to `cfcr`
 * `deployments_network` - suggested change to `default`
+* `authorization_mode` - suggested change to `abac` (if `rbac` is not stable/working)
